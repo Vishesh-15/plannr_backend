@@ -40,6 +40,11 @@ All documents use custom UUID ids (`user_id`, `task_id`, …). `_id` always excl
 - Full dark mode, Manrope + IBM Plex Sans + JetBrains Mono typography
 - All interactive elements have `data-testid`
 
+### Iteration 2 (2026-02)
+- **Student / Exams**: exams now support **multiple subjects** (checkbox multi-select); exam cards render all linked subject pills with colors. Backend: `Exam.subject_ids: List[str]`.
+- **Student / Tasks**: TaskDialog adds optional **"Link to exam"** selector when profile is student. Backend: `Task.exam_id`.
+- **Creator / Platforms**: fully user-managed. New `/api/platforms` CRUD. A "Platforms" button opens a manage-dialog where users can add custom platforms (name + color), use quick-add suggestion chips, and remove platforms. Content schedule tabs and Task/Idea platform dropdowns are now dynamic. Empty state prompts the user to add their first platform.
+
 ## Backlog
 - P1: Browser push notifications hook (Notification API) + reminder scheduler for upcoming exams/deadlines/uploads
 - P1: Recurring task materialization (currently stored as metadata, not auto-expanded)
