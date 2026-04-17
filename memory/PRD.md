@@ -22,6 +22,12 @@ Common: daily/weekly view, recurring tasks, in-app reminders (toasts + browser N
 - State: React context (AuthContext), per-page local state, axios client with withCredentials
 
 ### MongoDB Collections
+
+### Iteration 2 (2026-02)
+- **Student / Exams**: multi-subject selection (checkbox list). `Exam.subject_ids: List[str]`.
+- **Student / Tasks**: optional **"Link to exam"** selector in TaskDialog. `Task.exam_id`.
+- **Creator / Platforms**: user-managed platforms via `/api/platforms` CRUD; add/remove with colors + quick-add suggestions; Content tabs and dropdowns are now dynamic.
+
 `users`, `user_sessions`, `tasks`, `subjects`, `exams`, `clients`, `time_logs`, `payments`, `ideas`  
 All documents use custom UUID ids (`user_id`, `task_id`, …). `_id` always excluded from responses.
 
@@ -40,10 +46,13 @@ All documents use custom UUID ids (`user_id`, `task_id`, …). `_id` always excl
 - Full dark mode, Manrope + IBM Plex Sans + JetBrains Mono typography
 - All interactive elements have `data-testid`
 
-### Iteration 2 (2026-02)
-- **Student / Exams**: exams now support **multiple subjects** (checkbox multi-select); exam cards render all linked subject pills with colors. Backend: `Exam.subject_ids: List[str]`.
-- **Student / Tasks**: TaskDialog adds optional **"Link to exam"** selector when profile is student. Backend: `Task.exam_id`.
-- **Creator / Platforms**: fully user-managed. New `/api/platforms` CRUD. A "Platforms" button opens a manage-dialog where users can add custom platforms (name + color), use quick-add suggestion chips, and remove platforms. Content schedule tabs and Task/Idea platform dropdowns are now dynamic. Empty state prompts the user to add their first platform.
+### Iteration 3 (2026-02) — Firebase Auth migration
+- **Replaced Emergent Google Auth with Firebase Google Authentication.** All emergent-auth code paths removed.
+- Frontend: `firebase/auth` with `signInWithPopup(GoogleAuthProvider)`; persistent local login via `browserLocalPersistence`; axios interceptor attaches fresh Firebase ID token on every call via `currentUser.getIdToken()`.
+- Backend: `firebase-admin` SDK verifies `Authorization: Bearer <idToken>`. Service account at `/app/backend/firebase-admin.json`; path in `FIREBASE_CREDENTIALS_PATH` env. Users upserted by `firebase_uid`; existing email-match rows are migrated by linking `firebase_uid` in-place (no duplicates).
+- Removed: `POST /api/auth/session`, `POST /api/auth/logout`, all cookie-based session logic, `AuthCallback` page, hash-based routing.
+- User schema gained `firebase_uid`.
+- 39/39 Firebase auth tests pass.
 
 ## Backlog
 - P1: Browser push notifications hook (Notification API) + reminder scheduler for upcoming exams/deadlines/uploads
