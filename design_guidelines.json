@@ -1,0 +1,121 @@
+{
+  "theme": "System",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) + Soft Neutrals",
+  "colors": {
+    "light": {
+      "background": "#F9F9F8",
+      "surface": "#FFFFFF",
+      "text": "#1C1917",
+      "text_muted": "#78716C",
+      "border": "#E7E5E4",
+      "primary": "#1C1917",
+      "primary_foreground": "#FFFFFF",
+      "danger": "#EF4444",
+      "success": "#10B981"
+    },
+    "dark": {
+      "background": "#0C0C0C",
+      "surface": "#161616",
+      "text": "#F5F5F4",
+      "text_muted": "#A8A29E",
+      "border": "#292524",
+      "primary": "#F5F5F4",
+      "primary_foreground": "#0C0C0C",
+      "danger": "#F87171",
+      "success": "#34D399"
+    },
+    "profile_accents": {
+      "student": "green-500", 
+      "freelancer": "blue-500",
+      "creator": "amber-500"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "headings": "Manrope",
+      "body": "IBM Plex Sans",
+      "mono": "JetBrains Mono"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl font-semibold tracking-tight leading-tight",
+      "h2": "text-2xl sm:text-3xl font-medium tracking-tight",
+      "h3": "text-xl font-medium tracking-tight",
+      "body": "text-base leading-relaxed text-muted-foreground",
+      "label": "text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground",
+      "metadata": "text-xs font-mono text-muted-foreground"
+    }
+  },
+  "layout_patterns": {
+    "onboarding": {
+      "structure": "Bento grid (Mode A) to choose profiles (Student, Freelancer, Creator).",
+      "spacing": "Generous gaps (gap-8), massive padding (p-12) for containers.",
+      "background": "Minimalist blur overlay on login, solid color step-through."
+    },
+    "dashboard_global": {
+      "structure": "Control Room grid (Mode B). Left collapsible sidebar (240px wide). Main content area with a max-width wrapper (max-w-7xl mx-auto).",
+      "card_style": "Cardless where possible. Flat rectangles with 1px border-border, rounded-lg. Deep padding (p-6 or p-8).",
+      "calendar_view": "Dense table grid. High contrast focus on 'Today' column. Small, legible typography."
+    }
+  },
+  "profile_dashboards": {
+    "student": {
+      "vibe": "Focused, calm, structured. Green accents for completion and study blocks.",
+      "widgets": [
+        {"name": "Study Session Planner", "span": "col-span-1 md:col-span-2 row-span-2"},
+        {"name": "Exam Countdown", "span": "col-span-1"},
+        {"name": "Subject Task Tracker", "span": "col-span-1 md:col-span-3"},
+        {"name": "Revision Reminders", "span": "col-span-1 md:col-span-1 row-span-2"}
+      ]
+    },
+    "freelancer": {
+      "vibe": "Professional, time-sensitive. Blue accents for active states and tracking.",
+      "widgets": [
+        {"name": "Work Hour Logger (Timer)", "span": "col-span-1 row-span-1"},
+        {"name": "Deadline Tracker", "span": "col-span-1 md:col-span-2"},
+        {"name": "Client-wise Kanban", "span": "col-span-1 md:col-span-3"},
+        {"name": "Payment Due Reminders", "span": "col-span-1"}
+      ]
+    },
+    "creator": {
+      "vibe": "Energetic, visual. Amber accents for scheduling and inspiration.",
+      "widgets": [
+        {"name": "Next Upload Countdown", "span": "col-span-1"},
+        {"name": "Platform Posting Schedule", "span": "col-span-1 md:col-span-2"},
+        {"name": "Content Calendar View", "span": "col-span-1 md:col-span-3 row-span-2"},
+        {"name": "Idea Bank", "span": "col-span-1"}
+      ]
+    }
+  },
+  "component_styling_tokens": {
+    "buttons": "Flat, sharp edges (rounded-md). solid bg-primary text-primary-foreground. Hover: slight opacity dip (opacity-90).",
+    "inputs": "Shadcn-based. Very subtle filled background (bg-transparent), solid bottom border. Focus: thin 1px ring.",
+    "modals": "Glassmorphism overlays (backdrop-blur-xl bg-black/60). Dialog body is solid surface color, rounded-lg, p-8.",
+    "tabs": "Segmented control. Minimal pill shapes. Active state has solid surface background and sharp shadow.",
+    "badges": "Pill shape (rounded-full), monochrome or profile-specific accent with 10% opacity background and solid text."
+  },
+  "motion_and_microinteractions": {
+    "hover": "-translate-y-[1px] and shadow-sm for interactive rows (tasks).",
+    "click": "scale-[0.98] active state.",
+    "page_load": "Staggered fade-in (100ms delay between elements). No bouncy spring animations. Linear and fast (150ms ease-out).",
+    "toast": "Slide in from bottom-right. Snappy entrance."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "style": "size-4 or size-5. strokeWidth 1.5 for a clean, sharp look."
+  },
+  "assets": {
+    "image_urls": {
+      "login_bg": {
+        "url": "https://images.unsplash.com/photo-1773625688491-6110ff9f1e4f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwZGVzayUyMGFic3RyYWN0JTIwc2hhZG93fGVufDB8fHx8MTc3NjM5NjgxN3ww&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract sunlight streaming across a minimalist desk. Used as a faint background image behind the login/onboarding container with heavy opacity overlay."
+      }
+    }
+  },
+  "technical_rules": {
+    "components": "Use custom React components for layouts. heavily customize Shadcn UI for dropdowns, selects, and dialogs.",
+    "file_extension": "MUST use .js and .jsx for components (no TSX).",
+    "testing": "All interactive and key informational elements MUST include data-testid attribute (e.g., data-testid='submit-button', data-testid='task-item').",
+    "auth": "Firebase auth + Google login provider.",
+    "db": "Firestore for storing user profiles and tasks. Ensure user_id is linked to all documents."
+  }
+}
