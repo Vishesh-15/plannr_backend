@@ -1,20 +1,24 @@
 import axios from "axios";
+import { firebaseAuth } from "@/lib/firebase";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
-export const api = axios.create({
-  baseURL: API,
-  withCredentials: true,
+export const api = axios.create({ baseURL: API });
+
+// Attach a fresh Firebase ID token on every request
+api.interceptors.request.use(async (config) => {
+  const user = firebaseAuth.currentUser;
+  if (user) {
+    const token = await user.getIdToken();
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 export async function fetchMe() {
   const { data } = await api.get("/auth/me");
   return data;
-}
-
-export async function logout() {
-  await api.post("/auth/logout");
 }
 
 export async function updateProfile(patch) {

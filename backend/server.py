@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Literal
 import uuid
 from datetime import datetime, timezone, timedelta
-import httpx
+import firebase_admin
+from firebase_admin import credentials as fb_credentials, auth as fb_auth
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -19,10 +20,13 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+# Initialise Firebase Admin SDK (singleton)
+if not firebase_admin._apps:
+    cred_path = os.environ['FIREBASE_CREDENTIALS_PATH']
+    firebase_admin.initialize_app(fb_credentials.Certificate(cred_path))
+
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
-
-EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
 # ========================= MODELS =========================
 
@@ -31,6 +35,7 @@ ProfileType = Literal["student", "freelancer", "creator"]
 class User(BaseModel):
     model_config = ConfigDict(extra="ignore")
     user_id: str
+    firebase_uid: str
     email: str
     name: str
     picture: Optional[str] = None
@@ -226,32 +231,65 @@ class PlatformCreate(BaseModel):
 
 # ========================= AUTH HELPERS =========================
 
-async def get_session_token(request: Request) -> Optional[str]:
-    token = request.cookies.get("session_token")
-    if token:
-        return token
-    auth = request.headers.get("Authorization")
-    if auth and auth.lower().startswith("bearer "):
-        return auth.split(" ", 1)[1]
-    return None
+async def _get_or_create_user(decoded: dict) -> dict:
+    firebase_uid = decoded["uid"]
+    email = decoded.get("email") or ""
+    name = decoded.get("name") or email or "User"
+    picture = decoded.get("picture")
+
+    existing = await db.users.find_one({"firebase_uid": firebase_uid}, {"_id": 0})
+    if existing:
+        # keep profile picture + name fresh
+        updates = {}
+        if picture and existing.get("picture") != picture:
+            updates["picture"] = picture
+        if name and existing.get("name") != name:
+            updates["name"] = name
+        if updates:
+            await db.users.update_one({"firebase_uid": firebase_uid}, {"$set": updates})
+            existing.update(updates)
+        return existing
+
+    # Legacy user by email (migration from prior auth) — link firebase_uid instead of duplicating
+    by_email = await db.users.find_one({"email": email}, {"_id": 0}) if email else None
+    if by_email:
+        await db.users.update_one(
+            {"user_id": by_email["user_id"]},
+            {"$set": {"firebase_uid": firebase_uid, "picture": picture or by_email.get("picture"), "name": name}},
+        )
+        by_email["firebase_uid"] = firebase_uid
+        if picture:
+            by_email["picture"] = picture
+        by_email["name"] = name
+        return by_email
+
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    doc = {
+        "user_id": user_id,
+        "firebase_uid": firebase_uid,
+        "email": email,
+        "name": name,
+        "picture": picture,
+        "profile_type": None,
+        "theme": "system",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
 
 async def get_current_user(request: Request) -> User:
-    token = await get_session_token(request)
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    session_doc = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
-    if not session_doc:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    expires_at = session_doc.get("expires_at")
-    if isinstance(expires_at, str):
-        expires_at = datetime.fromisoformat(expires_at)
-    if expires_at and expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at and expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="Session expired")
-    user_doc = await db.users.find_one({"user_id": session_doc["user_id"]}, {"_id": 0})
-    if not user_doc:
-        raise HTTPException(status_code=401, detail="User not found")
+    auth_header = request.headers.get("Authorization") or ""
+    if not auth_header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = auth_header.split(" ", 1)[1]
+    try:
+        decoded = fb_auth.verify_id_token(token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+
+    user_doc = await _get_or_create_user(decoded)
     created_at = user_doc.get("created_at")
     if isinstance(created_at, str):
         user_doc["created_at"] = datetime.fromisoformat(created_at)
@@ -260,80 +298,9 @@ async def get_current_user(request: Request) -> User:
 
 # ========================= AUTH ROUTES =========================
 
-@api_router.post("/auth/session")
-async def process_session(request: Request, response: Response):
-    body = await request.json()
-    session_id = body.get("session_id")
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id required")
-
-    async with httpx.AsyncClient(timeout=10.0) as http:
-        r = await http.get(EMERGENT_AUTH_URL, headers={"X-Session-ID": session_id})
-        if r.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid session_id")
-        data = r.json()
-
-    email = data["email"]
-    name = data.get("name", email)
-    picture = data.get("picture")
-    session_token = data["session_token"]
-
-    existing = await db.users.find_one({"email": email}, {"_id": 0})
-    if existing:
-        user_id = existing["user_id"]
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"name": name, "picture": picture}}
-        )
-    else:
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        await db.users.insert_one({
-            "user_id": user_id,
-            "email": email,
-            "name": name,
-            "picture": picture,
-            "profile_type": None,
-            "theme": "system",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    await db.user_sessions.update_one(
-        {"session_token": session_token},
-        {"$set": {
-            "session_token": session_token,
-            "user_id": user_id,
-            "expires_at": expires_at,
-            "created_at": datetime.now(timezone.utc),
-        }},
-        upsert=True,
-    )
-
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        path="/",
-        max_age=7 * 24 * 60 * 60,
-    )
-    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    return {"user": user_doc}
-
-
 @api_router.get("/auth/me")
 async def auth_me(user: User = Depends(get_current_user)):
     return user.model_dump()
-
-
-@api_router.post("/auth/logout")
-async def logout(request: Request, response: Response):
-    token = await get_session_token(request)
-    if token:
-        await db.user_sessions.delete_one({"session_token": token})
-    response.delete_cookie("session_token", path="/", samesite="none", secure=True)
-    return {"ok": True}
 
 
 # ========================= USER ROUTES =========================
