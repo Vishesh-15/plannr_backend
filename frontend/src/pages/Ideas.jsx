@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { ideasApi } from "@/lib/api";
+import { ideasApi, platformsApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,7 +11,6 @@ import { Plus, Trash2, Lightbulb } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-const PLATFORMS = ["youtube", "instagram", "tiktok", "twitter", "linkedin", "blog"];
 const STATUSES = ["new", "planned", "published"];
 
 const statusClass = {
@@ -22,10 +21,15 @@ const statusClass = {
 
 export default function Ideas() {
   const [ideas, setIdeas] = useState([]);
+  const [platforms, setPlatforms] = useState([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ title: "", notes: "", platform: "", status: "new" });
 
-  const load = async () => setIdeas(await ideasApi.list());
+  const load = async () => {
+    const [i, p] = await Promise.all([ideasApi.list(), platformsApi.list()]);
+    setIdeas(i);
+    setPlatforms(p);
+  };
   useEffect(() => { load(); }, []);
 
   const submit = async (e) => {
@@ -93,7 +97,11 @@ export default function Ideas() {
                   <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">None</SelectItem>
-                    {PLATFORMS.map((p) => (<SelectItem key={p} value={p}>{p}</SelectItem>))}
+                    {platforms.length === 0 ? (
+                      <SelectItem value="__empty" disabled>
+                        Add platforms in Content first
+                      </SelectItem>
+                    ) : platforms.map((p) => (<SelectItem key={p.platform_id} value={p.name}>{p.name}</SelectItem>))}
                   </SelectContent>
                 </Select>
               </div>

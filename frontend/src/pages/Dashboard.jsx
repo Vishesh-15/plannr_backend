@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { useAuth } from "@/context/AuthContext";
-import { tasksApi, subjectsApi, clientsApi, examsApi, paymentsApi, ideasApi, timeLogsApi, statsApi } from "@/lib/api";
+import { tasksApi, subjectsApi, clientsApi, examsApi, paymentsApi, ideasApi, timeLogsApi, statsApi, platformsApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Plus, TrendingUp, Calendar, CheckCircle2, Clock3, AlertCircle, GraduationCap, Users, Film, BookOpen, Timer, Receipt, Lightbulb, CalendarRange } from "lucide-react";
 import TaskDialog from "@/components/TaskDialog";
@@ -24,6 +24,7 @@ export default function Dashboard() {
   const [payments, setPayments] = useState([]);
   const [ideas, setIdeas] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [platforms, setPlatforms] = useState([]);
   const [stats, setStats] = useState({ total: 0, done: 0, today: 0, pending: 0 });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -45,8 +46,9 @@ export default function Dashboard() {
       const [c, p, l] = await Promise.all([clientsApi.list(), paymentsApi.list(), timeLogsApi.list({ date_from: addDays(today, -6), date_to: today })]);
       setClients(c); setPayments(p); setLogs(l);
     } else if (pt === "creator") {
-      const i = await ideasApi.list();
+      const [i, p] = await Promise.all([ideasApi.list(), platformsApi.list()]);
       setIdeas(i);
+      setPlatforms(p);
     }
   };
 
@@ -155,6 +157,8 @@ export default function Dashboard() {
         initial={editing}
         subjects={subjects}
         clients={clients}
+        exams={exams}
+        platforms={platforms}
       />
     </AppShell>
   );

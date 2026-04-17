@@ -62,7 +62,9 @@ class Task(BaseModel):
     # Freelancer
     client_id: Optional[str] = None
     # Creator
-    platform: Optional[str] = None  # youtube, instagram, tiktok, twitter, linkedin, blog
+    platform: Optional[str] = None  # platform name (from user's platforms collection)
+    # Student - link a task to a specific exam (for revision/prep)
+    exam_id: Optional[str] = None
     tags: List[str] = []
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -79,6 +81,7 @@ class TaskCreate(BaseModel):
     subject_id: Optional[str] = None
     client_id: Optional[str] = None
     platform: Optional[str] = None
+    exam_id: Optional[str] = None
     tags: Optional[List[str]] = []
 
 class TaskUpdate(BaseModel):
@@ -94,6 +97,7 @@ class TaskUpdate(BaseModel):
     subject_id: Optional[str] = None
     client_id: Optional[str] = None
     platform: Optional[str] = None
+    exam_id: Optional[str] = None
     tags: Optional[List[str]] = None
 
 class Subject(BaseModel):
@@ -111,14 +115,14 @@ class Exam(BaseModel):
     exam_id: str = Field(default_factory=lambda: f"exam_{uuid.uuid4().hex[:10]}")
     user_id: str
     name: str
-    subject_id: Optional[str] = None
+    subject_ids: List[str] = []
     date: str  # ISO YYYY-MM-DD
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ExamCreate(BaseModel):
     name: str
-    subject_id: Optional[str] = None
+    subject_ids: Optional[List[str]] = []
     date: str
     notes: Optional[str] = None
 
@@ -205,6 +209,19 @@ class IdeaUpdate(BaseModel):
     platform: Optional[str] = None
     tags: Optional[List[str]] = None
     status: Optional[str] = None
+
+
+class Platform(BaseModel):
+    platform_id: str = Field(default_factory=lambda: f"plat_{uuid.uuid4().hex[:10]}")
+    user_id: str
+    name: str
+    color: str = "#F59E0B"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PlatformCreate(BaseModel):
+    name: str
+    color: Optional[str] = "#F59E0B"
 
 
 # ========================= AUTH HELPERS =========================
@@ -568,6 +585,36 @@ async def update_idea(idea_id: str, payload: IdeaUpdate, user: User = Depends(ge
 @api_router.delete("/ideas/{idea_id}")
 async def delete_idea(idea_id: str, user: User = Depends(get_current_user)):
     await db.ideas.delete_one({"idea_id": idea_id, "user_id": user.user_id})
+    return {"ok": True}
+
+
+# ========================= PLATFORMS (Creator) =========================
+
+@api_router.get("/platforms")
+async def list_platforms(user: User = Depends(get_current_user)):
+    docs = await db.platforms.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    return docs
+
+
+@api_router.post("/platforms")
+async def create_platform(payload: PlatformCreate, user: User = Depends(get_current_user)):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    existing = await db.platforms.find_one({"user_id": user.user_id, "name": name})
+    if existing:
+        raise HTTPException(status_code=409, detail="Platform already exists")
+    plat = Platform(user_id=user.user_id, name=name, color=payload.color or "#F59E0B")
+    doc = plat.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    await db.platforms.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.delete("/platforms/{platform_id}")
+async def delete_platform(platform_id: str, user: User = Depends(get_current_user)):
+    await db.platforms.delete_one({"platform_id": platform_id, "user_id": user.user_id})
     return {"ok": True}
 
 

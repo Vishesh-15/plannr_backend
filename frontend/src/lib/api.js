@@ -67,6 +67,12 @@ export const ideasApi = {
   remove: (id) => api.delete(`/ideas/${id}`).then((r) => r.data),
 };
 
+export const platformsApi = {
+  list: () => api.get("/platforms").then((r) => r.data),
+  create: (p) => api.post("/platforms", p).then((r) => r.data),
+  remove: (id) => api.delete(`/platforms/${id}`).then((r) => r.data),
+};
+
 export const statsApi = {
   get: () => api.get("/dashboard/stats").then((r) => r.data),
 };

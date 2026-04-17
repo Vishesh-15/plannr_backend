@@ -8,14 +8,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
-const PLATFORMS = ["youtube", "instagram", "tiktok", "twitter", "linkedin", "blog"];
 const CATEGORY_BY_PT = {
   student: ["study", "revision", "assignment", "class"],
   freelancer: ["deadline", "meeting", "admin", "invoice"],
   creator: ["script", "filming", "editing", "posting"],
 };
 
-export default function TaskDialog({ open, onOpenChange, onSubmit, initial, subjects = [], clients = [] }) {
+export default function TaskDialog({
+  open,
+  onOpenChange,
+  onSubmit,
+  initial,
+  subjects = [],
+  clients = [],
+  exams = [],
+  platforms = [],
+}) {
   const { user } = useAuth();
   const pt = user?.profile_type;
   const [form, setForm] = useState({
@@ -30,6 +38,7 @@ export default function TaskDialog({ open, onOpenChange, onSubmit, initial, subj
     subject_id: "",
     client_id: "",
     platform: "",
+    exam_id: "",
   });
 
   useEffect(() => {
@@ -46,6 +55,7 @@ export default function TaskDialog({ open, onOpenChange, onSubmit, initial, subj
         subject_id: initial?.subject_id || "",
         client_id: initial?.client_id || "",
         platform: initial?.platform || "",
+        exam_id: initial?.exam_id || "",
       });
     }
   }, [open, initial]);
@@ -65,6 +75,7 @@ export default function TaskDialog({ open, onOpenChange, onSubmit, initial, subj
       subject_id: form.subject_id || null,
       client_id: form.client_id || null,
       platform: form.platform || null,
+      exam_id: form.exam_id || null,
       category: form.category || null,
       time: form.time || null,
     };
@@ -80,28 +91,16 @@ export default function TaskDialog({ open, onOpenChange, onSubmit, initial, subj
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[520px]" data-testid="task-dialog">
         <DialogHeader>
-          <DialogTitle className="font-display text-xl">{initial ? "Edit task" : "New task"}</DialogTitle>
+          <DialogTitle className="font-display text-xl">{initial?.task_id ? "Edit task" : "New task"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-4">
           <div className="grid gap-2">
             <Label>Title</Label>
-            <Input
-              data-testid="task-title-input"
-              value={form.title}
-              onChange={(e) => set("title", e.target.value)}
-              placeholder="What needs to be done?"
-              autoFocus
-            />
+            <Input data-testid="task-title-input" value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="What needs to be done?" autoFocus />
           </div>
           <div className="grid gap-2">
             <Label>Description</Label>
-            <Textarea
-              data-testid="task-desc-input"
-              value={form.description}
-              onChange={(e) => set("description", e.target.value)}
-              placeholder="Optional details"
-              rows={3}
-            />
+            <Textarea data-testid="task-desc-input" value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Optional details" rows={3} />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="grid gap-2">
@@ -190,12 +189,35 @@ export default function TaskDialog({ open, onOpenChange, onSubmit, initial, subj
                   <SelectTrigger data-testid="task-platform"><SelectValue placeholder="—" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">None</SelectItem>
-                    {PLATFORMS.map((p) => (<SelectItem key={p} value={p}>{p}</SelectItem>))}
+                    {platforms.length === 0 ? (
+                      <SelectItem value="__empty" disabled>Add platforms first</SelectItem>
+                    ) : platforms.map((p) => (
+                      <SelectItem key={p.platform_id} value={p.name}>{p.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
             )}
           </div>
+
+          {pt === "student" && (
+            <div className="grid gap-2">
+              <Label>Link to exam <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Select value={form.exam_id || "none"} onValueChange={(v) => set("exam_id", v === "none" ? "" : v)}>
+                <SelectTrigger data-testid="task-exam"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {exams.length === 0 ? (
+                    <SelectItem value="__empty" disabled>No exams yet</SelectItem>
+                  ) : exams.map((ex) => (
+                    <SelectItem key={ex.exam_id} value={ex.exam_id}>
+                      {ex.name} · {ex.date}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <DialogFooter className="mt-2">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} data-testid="task-cancel">Cancel</Button>

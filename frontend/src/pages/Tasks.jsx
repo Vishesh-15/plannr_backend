@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
-import { tasksApi, subjectsApi, clientsApi } from "@/lib/api";
+import { tasksApi, subjectsApi, clientsApi, examsApi, platformsApi } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,8 @@ export default function Tasks() {
   const [tasks, setTasks] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [clients, setClients] = useState([]);
+  const [exams, setExams] = useState([]);
+  const [platforms, setPlatforms] = useState([]);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -27,8 +29,13 @@ export default function Tasks() {
   const load = async () => {
     const t = await tasksApi.list();
     setTasks(t);
-    if (pt === "student") setSubjects(await subjectsApi.list());
+    if (pt === "student") {
+      const [s, e] = await Promise.all([subjectsApi.list(), examsApi.list()]);
+      setSubjects(s);
+      setExams(e);
+    }
     if (pt === "freelancer") setClients(await clientsApi.list());
+    if (pt === "creator") setPlatforms(await platformsApi.list());
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [pt]);
 
@@ -103,7 +110,7 @@ export default function Tasks() {
         </div>
       )}
 
-      <TaskDialog open={open} onOpenChange={setOpen} onSubmit={submit} initial={editing} subjects={subjects} clients={clients} />
+      <TaskDialog open={open} onOpenChange={setOpen} onSubmit={submit} initial={editing} subjects={subjects} clients={clients} exams={exams} platforms={platforms} />
     </AppShell>
   );
 }
