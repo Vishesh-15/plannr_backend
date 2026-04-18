@@ -285,9 +285,10 @@ async def get_current_user(request: Request) -> User:
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = auth_header.split(" ", 1)[1]
     try:
-        decoded = fb_auth.verify_id_token(token)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+    decoded = fb_auth.verify_id_token(token)
+    except Exception as verify_error:
+    print(f"TOKEN VERIFY ERROR: {verify_error}")
+    raise HTTPException(status_code=401, detail=f"Token error: {verify_error}")
 
     user_doc = await _get_or_create_user(decoded)
     created_at = user_doc.get("created_at")
