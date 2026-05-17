@@ -13,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 import httpx
 import firebase_admin
 from firebase_admin import credentials as fb_credentials, auth as fb_auth
+import base64
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -232,110 +233,123 @@ class PlatformCreate(BaseModel):
 # ========================= AUTH HELPERS =========================
 
 async def get_current_user(request: Request) -> User:
-    auth = request.headers.get("Authorization")
-    if not auth or not auth.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    token = auth.split(" ", 1)[1]
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing token")
+    token = auth_header[7:]
     try:
         decoded = fb_auth.verify_id_token(token)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
-
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
     uid = decoded["uid"]
-    email = decoded.get("email", "")
-    name = decoded.get("name", email)
-    picture = decoded.get("picture")
-
-    user_doc = await db.users.find_one({"user_id": uid}, {"_id": 0})
-    if not user_doc:
-        await db.users.insert_one({
-            "user_id": uid,
-            "email": email,
-            "name": name,
-            "picture": picture,
-            "profile_type": None,
-            "theme": "system",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-        user_doc = await db.users.find_one({"user_id": uid}, {"_id": 0})
-    else:
-        await db.users.update_one({"user_id": uid}, {"$set": {"name": name, "picture": picture}})
-        user_doc = await db.users.find_one({"user_id": uid}, {"_id": 0})
-
-    created_at = user_doc.get("created_at")
-    if isinstance(created_at, str):
-        user_doc["created_at"] = datetime.fromisoformat(created_at)
-    return User(**user_doc)
+    doc = await db.users.find_one({"user_id": uid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    return User(**doc)
 
 
-# ========================= AUTH ROUTES =========================
+# ========================= WOF RAZORPAY =========================
 
-@api_router.get("/auth/me")
-async def auth_me(user: User = Depends(get_current_user)):
-    return user.model_dump()
+@api_router.post("/wof/create-order")
+async def wof_create_order():
+    rzp_key_id = os.environ.get("WOF_RAZORPAY_KEY_ID")
+    rzp_key_secret = os.environ.get("WOF_RAZORPAY_KEY_SECRET")
+    if not rzp_key_id or not rzp_key_secret:
+        raise HTTPException(status_code=500, detail="Razorpay credentials not configured")
+
+    receipt = f"wof_{uuid.uuid4().hex[:12]}"
+    credentials = base64.b64encode(f"{rzp_key_id}:{rzp_key_secret}".encode()).decode()
+
+    async with httpx.AsyncClient() as http:
+        resp = await http.post(
+            "https://api.razorpay.com/v1/orders",
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "amount": 19900,
+                "currency": "INR",
+                "receipt": receipt,
+            },
+        )
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Razorpay order creation failed")
+
+    data = resp.json()
+    return {"order_id": data["id"], "amount": data["amount"], "currency": data["currency"]}
 
 
-@api_router.post("/auth/logout")
-async def logout():
-    return {"ok": True}
+# ========================= USERS =========================
+
+@api_router.get("/users/me")
+async def get_me(user: User = Depends(get_current_user)):
+    return user
 
 
-# ========================= USER ROUTES =========================
+@api_router.post("/users")
+async def create_user(request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing token")
+    token = auth_header[7:]
+    try:
+        decoded = fb_auth.verify_id_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    uid = decoded["uid"]
+    existing = await db.users.find_one({"user_id": uid})
+    if existing:
+        existing.pop("_id", None)
+        return existing
+    body = await request.json()
+    user = User(
+        user_id=uid,
+        email=decoded.get("email", ""),
+        name=body.get("name", decoded.get("name", "")),
+        picture=decoded.get("picture"),
+        created_at=datetime.now(timezone.utc),
+    )
+    doc = user.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    await db.users.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
 
-@api_router.patch("/user/profile")
-async def update_profile(update: ProfileUpdate, user: User = Depends(get_current_user)):
-    patch = {k: v for k, v in update.model_dump().items() if v is not None}
+
+@api_router.patch("/users/me")
+async def update_me(payload: ProfileUpdate, user: User = Depends(get_current_user)):
+    patch = {k: v for k, v in payload.model_dump().items() if v is not None}
     if patch:
         await db.users.update_one({"user_id": user.user_id}, {"$set": patch})
-    user_doc = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
-    return user_doc
+    doc = await db.users.find_one({"user_id": user.user_id}, {"_id": 0})
+    return doc
 
 
 # ========================= TASKS =========================
 
-def _strip_datetime(doc: dict) -> dict:
-    if "created_at" in doc and isinstance(doc["created_at"], datetime):
-        doc["created_at"] = doc["created_at"].isoformat()
-    return doc
-
-
 @api_router.get("/tasks")
 async def list_tasks(
     user: User = Depends(get_current_user),
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    category: Optional[str] = None,
-    subject_id: Optional[str] = None,
-    client_id: Optional[str] = None,
-    platform: Optional[str] = None,
+    profile_type: Optional[str] = None,
     status: Optional[str] = None,
+    date: Optional[str] = None,
 ):
     q: dict = {"user_id": user.user_id}
-    if date_from and date_to:
-        q["date"] = {"$gte": date_from, "$lte": date_to}
-    elif date_from:
-        q["date"] = {"$gte": date_from}
-    elif date_to:
-        q["date"] = {"$lte": date_to}
-    if category:
-        q["category"] = category
-    if subject_id:
-        q["subject_id"] = subject_id
-    if client_id:
-        q["client_id"] = client_id
-    if platform:
-        q["platform"] = platform
+    if profile_type:
+        q["profile_type"] = profile_type
     if status:
         q["status"] = status
-    docs = await db.tasks.find(q, {"_id": 0}).sort([("date", 1), ("time", 1)]).to_list(1000)
+    if date:
+        q["date"] = date
+    docs = await db.tasks.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return docs
 
 
 @api_router.post("/tasks")
 async def create_task(payload: TaskCreate, user: User = Depends(get_current_user)):
-    if not user.profile_type:
-        raise HTTPException(status_code=400, detail="Profile type not set")
-    task = Task(user_id=user.user_id, profile_type=user.profile_type, **payload.model_dump(exclude_unset=True))
+    task = Task(user_id=user.user_id, **payload.model_dump())
     doc = task.model_dump()
     doc["created_at"] = doc["created_at"].isoformat()
     await db.tasks.insert_one(doc)
@@ -347,9 +361,7 @@ async def create_task(payload: TaskCreate, user: User = Depends(get_current_user
 async def update_task(task_id: str, payload: TaskUpdate, user: User = Depends(get_current_user)):
     patch = {k: v for k, v in payload.model_dump().items() if v is not None}
     if patch:
-        result = await db.tasks.update_one({"task_id": task_id, "user_id": user.user_id}, {"$set": patch})
-        if result.matched_count == 0:
-            raise HTTPException(status_code=404, detail="Task not found")
+        await db.tasks.update_one({"task_id": task_id, "user_id": user.user_id}, {"$set": patch})
     doc = await db.tasks.find_one({"task_id": task_id, "user_id": user.user_id}, {"_id": 0})
     return doc
 
