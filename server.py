@@ -5,6 +5,9 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import hmac
+import hashlib
+import base64
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Literal
@@ -12,8 +15,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import httpx
 import firebase_admin
-from firebase_admin import credentials as fb_credentials, auth as fb_auth
-import base64
+from firebase_admin import credentials as fb_credentials, auth as fb_auth, firestore as fb_firestore
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -56,20 +58,16 @@ class Task(BaseModel):
     title: str
     description: Optional[str] = None
     profile_type: ProfileType
-    category: Optional[str] = None  # e.g., "study", "deadline", "content", "revision"
-    date: Optional[str] = None  # ISO date YYYY-MM-DD
-    time: Optional[str] = None  # HH:mm
+    category: Optional[str] = None
+    date: Optional[str] = None
+    time: Optional[str] = None
     duration_min: Optional[int] = None
-    status: str = "pending"  # pending, in_progress, done
-    priority: str = "normal"  # low, normal, high
-    recurring: Optional[str] = None  # none, daily, weekly, monthly
-    # Student
+    status: str = "pending"
+    priority: str = "normal"
+    recurring: Optional[str] = None
     subject_id: Optional[str] = None
-    # Freelancer
     client_id: Optional[str] = None
-    # Creator
-    platform: Optional[str] = None  # platform name (from user's platforms collection)
-    # Student - link a task to a specific exam (for revision/prep)
+    platform: Optional[str] = None
     exam_id: Optional[str] = None
     tags: List[str] = []
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -122,7 +120,7 @@ class Exam(BaseModel):
     user_id: str
     name: str
     subject_ids: List[str] = []
-    date: str  # ISO YYYY-MM-DD
+    date: str
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -172,7 +170,7 @@ class Payment(BaseModel):
     amount: float
     currency: str = "USD"
     due_date: str
-    status: str = "pending"  # pending, received, overdue
+    status: str = "pending"
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -199,7 +197,7 @@ class Idea(BaseModel):
     notes: Optional[str] = None
     platform: Optional[str] = None
     tags: List[str] = []
-    status: str = "new"  # new, planned, published
+    status: str = "new"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class IdeaCreate(BaseModel):
@@ -216,14 +214,12 @@ class IdeaUpdate(BaseModel):
     tags: Optional[List[str]] = None
     status: Optional[str] = None
 
-
 class Platform(BaseModel):
     platform_id: str = Field(default_factory=lambda: f"plat_{uuid.uuid4().hex[:10]}")
     user_id: str
     name: str
     color: str = "#F59E0B"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 
 class PlatformCreate(BaseModel):
     name: str
@@ -251,11 +247,15 @@ async def get_current_user(request: Request) -> User:
 # ========================= WOF RAZORPAY =========================
 
 @api_router.post("/wof/create-order")
-async def wof_create_order():
+async def wof_create_order(request: Request):
     rzp_key_id = os.environ.get("WOF_RAZORPAY_KEY_ID")
     rzp_key_secret = os.environ.get("WOF_RAZORPAY_KEY_SECRET")
     if not rzp_key_id or not rzp_key_secret:
         raise HTTPException(status_code=500, detail="Razorpay credentials not configured")
+
+    # Get firebase_uid from request body
+    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    firebase_uid = body.get("firebase_uid") if isinstance(body, dict) else None
 
     receipt = f"wof_{uuid.uuid4().hex[:12]}"
     credentials = base64.b64encode(f"{rzp_key_id}:{rzp_key_secret}".encode()).decode()
@@ -267,18 +267,73 @@ async def wof_create_order():
                 "Authorization": f"Basic {credentials}",
                 "Content-Type": "application/json",
             },
-            json={
-                "amount": 19900,
-                "currency": "INR",
-                "receipt": receipt,
-            },
+            json={"amount": 19900, "currency": "INR", "receipt": receipt},
         )
 
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail="Razorpay order creation failed")
 
     data = resp.json()
-    return {"order_id": data["id"], "amount": data["amount"], "currency": data["currency"]}
+    order_id = data["id"]
+
+    # Store order_id → firebase_uid mapping for webhook
+    if firebase_uid:
+        await db.wof_orders.insert_one({
+            "order_id": order_id,
+            "firebase_uid": firebase_uid,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    return {"order_id": order_id, "amount": data["amount"], "currency": data["currency"]}
+
+
+@api_router.post("/wof/webhook")
+async def wof_webhook(request: Request):
+    webhook_secret = os.environ.get("WOF_RAZORPAY_WEBHOOK_SECRET", "")
+    raw_body = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+
+    # Verify webhook signature
+    if webhook_secret:
+        expected = hmac.new(
+            webhook_secret.encode("utf-8"),
+            raw_body,
+            hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    import json
+    payload = json.loads(raw_body)
+    event = payload.get("event")
+
+    if event == "payment.captured":
+        payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
+        order_id = payment_entity.get("order_id")
+        payment_id = payment_entity.get("id")
+
+        if order_id:
+            # Look up firebase_uid from MongoDB
+            order_doc = await db.wof_orders.find_one({"order_id": order_id})
+            if order_doc:
+                firebase_uid = order_doc.get("firebase_uid")
+                if firebase_uid:
+                    # Update Firestore hasPaid
+                    fs = fb_firestore.client()
+                    fs.collection("users").document(firebase_uid).set(
+                        {"hasPaid": True}, merge=True
+                    )
+                    # Store payment record
+                    await db.wof_payments.insert_one({
+                        "razorpay_payment_id": payment_id,
+                        "razorpay_order_id": order_id,
+                        "firebase_uid": firebase_uid,
+                        "amount": 19900,
+                        "currency": "INR",
+                        "paid_at": datetime.now(timezone.utc).isoformat(),
+                    })
+
+    return {"ok": True}
 
 
 # ========================= USERS =========================
